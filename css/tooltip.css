@@ -1,0 +1,30 @@
+/* --- Tooltip Styles (JS-Powered) --- */
+.spotify-tooltip {
+    position: fixed; /* Dùng 'fixed' để định vị so với viewport */
+    background-color: #282828;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm, 4px);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: var(--z-tooltip, 50);
+
+    /* Ẩn theo mặc định */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none; /* Ngăn tooltip cản trở các sự kiện chuột */
+
+    /* Dịch chuyển tooltip lên trên và căn giữa theo chiều ngang */
+    transform: translate(-50%, calc(-100% - 8px)); /* 8px là khoảng cách */
+
+    /* Hiệu ứng chuyển động mượt mà */
+    transition: opacity 0.2s ease-in-out;
+}
+
+.spotify-tooltip.show {
+    opacity: 1;
+    visibility: visible;
+    /* Thêm một chút độ trễ để tránh tooltip nhấp nháy khi di chuột nhanh */
+    transition-delay: 0.4s;
+}
