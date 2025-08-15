@@ -1,4 +1,5 @@
 import httpRequest from "./utils/httpRequest.js";
+import Player from "./components/Player.js";
 
 /**
     Show Toast Message Function
@@ -563,19 +564,47 @@ function createPlaylistLibraryItem(playlist) {
     item.className = "library-item";
     item.dataset.playlistId = playlist.id;
 
-    const ownerName = playlist.user_display_name || playlist.user_username;
-
-    item.innerHTML = `
-        <img
-            src="${playlist.image_url || "placeholder.svg?height=48&width=48"}"
-            alt="${playlist.name}"
-            class="item-image"
-        />
-        <div class="item-info">
-            <div class="item-title">${playlist.name}</div>
-            <div class="item-subtitle">Playlist • ${ownerName}</div>
-        </div>
-    `;
+    // Xử lý đặc biệt cho "Liked Songs"
+    if (playlist.name === "Liked Songs") {
+        item.innerHTML = `
+            <div class="item-icon liked-songs">
+                <i class="fas fa-heart"></i>
+            </div>
+            <div class="item-info">
+                <div class="item-title">Liked Songs</div>
+                <div class="item-subtitle">
+                    Playlist • ${playlist.total_tracks} songs
+                </div>
+            </div>
+        `;
+    } else {
+        let ownerName = playlist.user_display_name || playlist.user_username;
+        //Xử lý trường hợp nếu user_display_name và playlist.user_username null thì lấy 6 ký tự đầu của email fill vào Subtitle
+        if (!ownerName) {
+            // Fallback: Lấy email của người dùng hiện tại từ DOM
+            const userEmail = document.getElementById("user-name")?.textContent;
+            if (userEmail) {
+                const emailUsername = userEmail.split("@")[0];
+                // Lấy 6 ký tự đầu của phần tên email
+                ownerName = emailUsername.substring(0, 6);
+            }
+        }
+        item.innerHTML = `
+            <img
+                src="${
+                    playlist.image_url || "placeholder.svg?height=48&width=48"
+                }"
+                alt="${playlist.name}"
+                class="item-image"
+            />
+            <div class="item-info">
+                <div class="item-title">${playlist.name}</div>
+                <div class="item-subtitle">Playlist • ${
+                    ownerName || "You"
+                }</div>
+            </div>
+        `;
+    }
     return item;
 }
 
@@ -588,7 +617,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         // Lấy danh sách nghệ sĩ và playlist song song để tối ưu tốc độ
         const [{ artists }, { playlists }] = await Promise.all([
             httpRequest.get("artists?limit=20&offset=0"),
-            httpRequest.get("playlists?limit=50"), // Giả sử endpoint này lấy playlist của user
+            httpRequest.get("me/playlists"), // Lấy playlist của người dùng đã đăng nhập
         ]);
 
         artists?.forEach((artist) =>
@@ -763,15 +792,38 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     //Hàm xử lý Context Menu
-    contextMenu.addEventListener("click", (e) => {
+    contextMenu.addEventListener("click", async (e) => {
         const actionItem = e.target.closest("[data-action]");
         if (!actionItem) return;
 
         const action = actionItem.dataset.action;
-        const itemName =
-            currentTargetItem?.querySelector(".item-title")?.textContent;
-        console.log(`Action: '${action}' on item: '${itemName}'`);
-        // Xử lý logic sau
+
+        if (action === "delete") {
+            if (!currentTargetItem) return;
+
+            const playlistId = currentTargetItem.dataset.playlistId;
+            const playlistName =
+                currentTargetItem.querySelector(".item-title").textContent;
+
+            if (!playlistId) return;
+
+            try {
+                await httpRequest.delete(`playlists/${playlistId}`);
+                showToast(`Đã xóa playlist "${playlistName}"`, "success");
+
+                // Xóa khỏi DOM
+                currentTargetItem.remove();
+
+                // Nếu đang xem chi tiết playlist này thì quay về home
+                if (currentPlaylistForUpdate?.id === playlistId) {
+                    switchToHomeView();
+                }
+            } catch (error) {
+                console.error("Không thể xóa playlist:", error);
+                showToast("Không thể xóa playlist. Vui lòng thử lại.", "error");
+            }
+        }
+
         closeContextMenu();
     });
 });
@@ -788,6 +840,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const createPlaylistBtn = document.querySelector(".sidebar .create-btn");
     const imageUploader = document.getElementById("imageUploader");
     const heroImageWrapper = artistView.querySelector(".hero-image-wrapper");
+    const trackListContainer = artistView.querySelector(".track-list");
     const playPauseBtn = document.querySelector(".player-center .play-btn");
     const shuffleBtn = document.querySelector(
         '.player-controls button[data-tooltip*="ngẫu nhiên"]'
@@ -819,6 +872,7 @@ document.addEventListener("DOMContentLoaded", () => {
         !createPlaylistBtn ||
         !imageUploader ||
         !heroImageWrapper ||
+        !trackListContainer ||
         !playPauseBtn ||
         !prevBtn ||
         !nextBtn ||
@@ -830,30 +884,14 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
     }
 
-    // --- Player State and Elements ---
-    const audio = new Audio();
-    const playerState = {
-        currentQueue: [],
-        originalQueue: [],
-        currentTrackIndex: -1,
-        isPlaying: false,
-        currentTrack: null,
-        isShuffled: false,
-        repeatMode: "none", // 'none', 'all', 'one'
-    };
+    // --- Component Initialization ---
+    const player = new Player({ trackListContainer });
+
+    // --- State ---
     const trackDataMap = new Map();
-
-    // Player UI elements
-    const playerImage = document.querySelector(".player-image");
-    const playerTitle = document.querySelector(".player-title");
-    const playerArtist = document.querySelector(".player-artist");
-    const trackListContainer = artistView.querySelector(".track-list");
-    const playPauseIcon = playPauseBtn.querySelector("i");
-
-    // --- State for other functionalities ---
     let currentArtistForFollowing = null;
     let currentPlaylistForUpdate = null;
-    let currentFollowPlaylist = null;
+    let isCurrentlyFollowing = false; // Trạng thái follow hiện tại của nghệ sĩ
 
     //Chuyển ẩn UI
     function switchToArtistView() {
@@ -871,244 +909,6 @@ document.addEventListener("DOMContentLoaded", () => {
     //Trở về Home
     logo.addEventListener("click", switchToHomeView);
     homeBtn.addEventListener("click", switchToHomeView);
-
-    // --- Player Controls Event Listeners ---
-    playPauseBtn.addEventListener("click", togglePlayPause);
-    shuffleBtn.addEventListener("click", toggleShuffle);
-    repeatBtn.addEventListener("click", toggleRepeat);
-    prevBtn.addEventListener("click", playPrevious);
-    nextBtn.addEventListener("click", playNext);
-    audio.addEventListener("ended", handleTrackEnd);
-
-    audio.addEventListener("play", () => {
-        playerState.isPlaying = true;
-        updatePlayPauseButton(true);
-    });
-
-    audio.addEventListener("pause", () => {
-        playerState.isPlaying = false;
-        updatePlayPauseButton(false);
-    });
-
-    audio.addEventListener("timeupdate", updateProgress);
-    audio.addEventListener("loadedmetadata", () => {
-        durationEl.textContent = formatTime(audio.duration);
-    });
-    progressBar.addEventListener("click", seek);
-
-    function togglePlayPause() {
-        //Không làm gì nếu bài hát chưa tải xong
-        if (!playerState.currentTrack) return;
-
-        if (playerState.isPlaying) {
-            audio.pause();
-        } else {
-            audio.play();
-        }
-    }
-
-    function handleTrackEnd() {
-        if (playerState.repeatMode === "one") {
-            audio.currentTime = 0;
-            audio.play();
-        } else {
-            playNext();
-        }
-    }
-
-    function toggleShuffle() {
-        playerState.isShuffled = !playerState.isShuffled;
-        shuffleBtn.classList.toggle("active", playerState.isShuffled);
-        shuffleBtn.dataset.tooltip = playerState.isShuffled
-            ? "Tắt phát ngẫu nhiên"
-            : "Bật phát ngẫu nhiên";
-
-        if (playerState.isShuffled) {
-            const currentTrackId = playerState.currentTrack?.id;
-            playerState.currentQueue = shuffleArray([
-                ...playerState.originalQueue,
-            ]);
-            if (currentTrackId) {
-                playerState.currentTrackIndex =
-                    playerState.currentQueue.findIndex(
-                        (t) => t.id === currentTrackId
-                    );
-            }
-        } else {
-            const currentTrackId = playerState.currentTrack?.id;
-            playerState.currentQueue = playerState.originalQueue;
-
-            if (currentTrackId) {
-                playerState.currentTrackIndex =
-                    playerState.currentQueue.findIndex(
-                        (t) => t.id === currentTrackId
-                    );
-            }
-        }
-    }
-
-    function toggleRepeat() {
-        if (playerState.repeatMode === "none") {
-            repeatBtn.classList.add("active");
-            repeatBtn.dataset.tooltip = "Bật lặp lại";
-        } else {
-            repeatBtn.classList.add("active");
-            repeatBtn.dataset.tooltip =
-                playerState.repeatMode === "all"
-                    ? "Bật lặp lại một bài"
-                    : "Tắt lặp lại";
-        }
-    }
-
-    function updateRepeatButton() {
-        if (playerState.repeatMode === "none") {
-            repeatBtn.classList.remove("active");
-            repeatBtn.dataset.tooltip = "Bật lặp lại";
-        } else {
-            repeatBtn.classList.add("active");
-            repeatBtn.dataset.tooltip =
-                playerState.repeatMode === "all"
-                    ? "Bật lặp lại một bài"
-                    : "Tắt lặp lại";
-        }
-    }
-
-    function playNext() {
-        if (playerState.currentQueue.length === 0) return;
-
-        const isLastTrack =
-            playerState.currentTrackIndex ===
-            playerState.currentQueue.length - 1;
-        //Check trường hợp bài cuối và ko có Repeat Mode
-        if (playerState.repeatMode === "none" && isLastTrack) {
-            playerState.isPlaying = false;
-            updatePlayPauseButton(false);
-            audio.pause();
-            audio.currentTime = 0;
-            updateProgress();
-            return;
-        }
-
-        playerState.currentTrackIndex =
-            (playerState.currentTrackIndex + 1) %
-            playerState.currentQueue.length;
-
-        playerState.currentTrack =
-            playerState.currentQueue[playerState.currentTrackIndex];
-        loadAndPlayCurrentTrack();
-    }
-
-    function playPrevious() {
-        if (playerState.currentQueue.length === 0) return;
-
-        // Nếu bài hát đã phát hơn 3 giây, phát lại từ đầu. Nếu không, chuyển về bài trước.
-        if (audio.currentTime > 3) {
-            audio.currentTime = 0;
-            return;
-        }
-        // Chuyển đến bài hát trước đó, quay vòng nếu ở đầu danh sách
-        playerState.currentTrackIndex =
-            (playerState.currentTrackIndex -
-                1 +
-                playerState.currentQueue.length) %
-            playerState.currentQueue.length;
-        playerState.currentTrack =
-            playerState.currentQueue[playerState.currentTrackIndex];
-        loadAndPlayCurrentTrack();
-    }
-
-    function updateProgress() {
-        if (audio.duration) {
-            const progressPercent = (audio.currentTime / audio.duration) * 100;
-            progressFill.style.width = `${progressPercent}%`;
-            currentTimeEl.textContent = formatTime(audio.currentTime);
-        }
-    }
-
-    function seek(e) {
-        const width = progressBar.clientWidth;
-        const clickX = e.offsetX;
-        const duration = audio.duration;
-
-        if (duration) {
-            audio.currentTime = (clickX / width) * duration;
-        }
-    }
-
-    function formatTime(seconds) {
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = Math.floor(seconds % 60)
-            .toString()
-            .padStart(2, "0");
-        return `${minutes}:${remainingSeconds}`;
-    }
-
-    //Thuật toán phát ngẫu nhiên bài
-    function shuffleArray(array) {
-        for (let i = array.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [array[i], array[j]] = [array[j], array[i]];
-        }
-        return array;
-    }
-
-    // --- End Player Controls ---
-
-    // ---- Player Logic
-    //Lắng nghe sự kiện click vào bài hát
-    trackListContainer.addEventListener("click", (e) => {
-        const trackItem = e.target.closest(".track-item");
-        if (trackItem && trackItem.dataset.trackId) {
-            const trackId = trackItem.dataset.trackId;
-            playTrackById(trackId);
-        }
-    });
-
-    function playTrackById(trackId) {
-        const trackToPlay = trackDataMap.get(trackId);
-        const trackIndex = playerState.currentQueue.findIndex(
-            (t) => t.id === trackId
-        );
-
-        if (trackToPlay && trackIndex > -1) {
-            playerState.currentTrack = trackToPlay;
-            playerState.currentTrackIndex = trackIndex;
-            loadAndPlayCurrentTrack();
-        } else {
-            console.error("Không tìm thấy bài hát trong hàng đợi:", trackId);
-        }
-    }
-
-    function loadAndPlayCurrentTrack() {
-        const track = playerState.currentTrack;
-        if (!track) return;
-
-        updatePlayerUI(track);
-        durationEl.textContent = "0:00"; // Reset duration display
-        audio.src = track.audio_url;
-        audio.play().catch((e) => console.error("Lỗi khi phát nhạc:", e));
-        updatePlayingTrackUI();
-    }
-
-    function updatePlayPauseButton(isPlaying) {
-        if (isPlaying) {
-            playPauseIcon.classList.replace("fa-play", "fa-pause");
-            playPauseBtn.dataset.tooltip = "Tạm dừng";
-        } else {
-            playPauseIcon.classList.replace("fa-pause", "fa-play");
-            playPauseBtn.dataset.tooltip = "Phát";
-        }
-    }
-
-    function updatePlayerUI(track) {
-        if (!track) return;
-        playerImage.src =
-            track.album?.cover_image_url ||
-            track.image_url ||
-            "placeholder.svg?height=56&width=56";
-        playerTitle.textContent = track.title;
-        playerArtist.textContent = track.artist_name;
-    }
 
     // Lắng nghe sự kiện cho việc điều hướng
     const handleNavigationClick = (e) => {
@@ -1156,26 +956,41 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!file || !currentPlaylistForUpdate) return;
 
         const formData = new FormData();
-        formData.append("image", file); // API yêu cầu key là 'image'
+        formData.append("cover", file); // API yêu cầu key là 'cover'
 
         try {
-            // API cập nhật playlist là PATCH /playlists/:id
-            const { playlist: updatedPlaylist } = await httpRequest.patch(
-                `playlists/${currentPlaylistForUpdate.id}`,
+            // API cập nhật ảnh bìa playlist là POST /upload/playlist/:id/cover
+            const response = await httpRequest.post(
+                `upload/playlist/${currentPlaylistForUpdate.id}/cover`,
                 formData
             );
 
+            // API trả về URL của file mới, không phải toàn bộ đối tượng playlist.
+            if (!response || !response.file || !response.file.url) {
+                console.error(
+                    "Phản hồi không hợp lệ từ API tải lên ảnh bìa:",
+                    response
+                );
+                throw new Error("API không trả về URL ảnh hợp lệ.");
+            }
+
+            const serverOrigin = new URL(httpRequest.baseURL).origin;
+            const newImageUrl = serverOrigin + response.file.url;
+
             // Cập nhật ảnh bìa trên trang chi tiết
             const heroImage = artistView.querySelector(".hero-image");
-            heroImage.src = updatedPlaylist.image_url;
+            heroImage.src = newImageUrl;
 
             // Cập nhật ảnh trong thư viện sidebar
             const libraryItem = document.querySelector(
-                `.library-item[data-playlist-id="${updatedPlaylist.id}"]`
+                `.library-item[data-playlist-id="${currentPlaylistForUpdate.id}"]`
             );
             if (libraryItem) {
                 const libraryImage = libraryItem.querySelector(".item-image");
-                libraryImage.src = updatedPlaylist.image_url;
+                // Chỉ cập nhật ảnh nếu mục đó có thẻ <img> (tránh lỗi với "Liked Songs")
+                if (libraryImage) {
+                    libraryImage.src = newImageUrl;
+                }
             }
 
             showToast("Đã cập nhật ảnh bìa playlist!", "success");
@@ -1234,29 +1049,16 @@ document.addEventListener("DOMContentLoaded", () => {
             // bằng cách tìm playlist tương ứng.
             await checkFollowStatus(artist);
 
-            // Bước 2: Lấy danh sách tất cả bài hát để lọc.
-            // Tách riêng lệnh gọi này để sau này có sửa dễ dàng hơn.
+            // Bước 2: Lấy danh sách bài hát phổ biến của nghệ sĩ.
             let artistTracks = [];
             try {
-                const allTracksResponse = await httpRequest.get(
-                    "tracks?limit=20&offset=0"
+                const { tracks } = await httpRequest.get(
+                    `artists/${artistId}/tracks/popular`
                 );
-                const allTracks = allTracksResponse?.tracks;
-
-                if (Array.isArray(allTracks)) {
-                    // Chọc vào toàn bộ danh sách bài hát theo artist_id ở phía client
-                    artistTracks = allTracks.filter(
-                        (track) => track.artist_id === artistId
-                    );
-                } else {
-                    console.error(
-                        "API không trả về danh sách bài hát hợp lệ. Phản hồi từ 'tracks' endpoint:",
-                        allTracksResponse
-                    );
-                }
+                artistTracks = tracks || [];
             } catch (trackError) {
                 console.error(
-                    "Lỗi khi gọi API lấy danh sách bài hát (tracks?limit=200):",
+                    `Lỗi khi lấy danh sách bài hát cho nghệ sĩ ${artistId}:`,
                     trackError
                 );
                 // Vẫn tiếp tục render trang chi tiết nghệ sĩ dù không có bài hát
@@ -1272,38 +1074,36 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- Follow/Unfollow Logic ---
 
-    // Kiểm tra trạng thái follow bằng cách tìm playlist đặc biệt
+    // Kiểm tra trạng thái follow bằng cách gọi API
     async function checkFollowStatus(artist) {
-        currentFollowPlaylist = null;
+        isCurrentlyFollowing = false; // Reset state
         updateFollowButton(false);
 
         try {
-            const { playlists } = await httpRequest.get(
-                "playlists?limit=20&offset=0"
+            // Lấy danh sách các nghệ sĩ mà người dùng đang theo dõi
+            // Cung cấp giá trị mặc định là mảng rỗng để tránh lỗi khi API không trả về key 'artists'
+            const { artists: followedArtists = [] } = await httpRequest.get(
+                // API endpoint to get followed artists
+                "me/following"
             );
-            const followPlaylistName = `[FOLLOW] ${artist.name}`;
 
-            const foundPlaylist = playlists.find(
-                (p) => p.name === followPlaylistName
-            );
-            if (foundPlaylist) {
-                currentFollowPlaylist = foundPlaylist;
-                updateFollowButton(true);
-            }
+            // Kiểm tra xem nghệ sĩ hiện tại có trong danh sách không
+            const isFollowing = followedArtists.some((a) => a.id === artist.id);
+
+            isCurrentlyFollowing = isFollowing;
+            updateFollowButton(isFollowing);
         } catch (error) {
             console.error("Could not check follow status:", error);
+            // Mặc định là không follow nếu có lỗi
+            isCurrentlyFollowing = false;
+            updateFollowButton(false);
         }
     }
 
     //Cập nhật UI nút Follow/Following
     function updateFollowButton(isFollowing) {
-        if (isFollowing) {
-            followBtn.textContent = "Following";
-            followBtn.classList.add("active");
-        } else {
-            followBtn.textContent = "Follow";
-            followBtn.classList.remove("active");
-        }
+        followBtn.textContent = isFollowing ? "Following" : "Follow";
+        followBtn.classList.toggle("active", isFollowing);
     }
 
     //Xử lý sự kiện click button
@@ -1312,29 +1112,31 @@ document.addEventListener("DOMContentLoaded", () => {
         followBtn.disabled = true;
 
         try {
-            if (currentFollowPlaylist) {
-                // Unfollow: xóa playlist
-                await httpRequest.delete(
-                    `playlists/${currentFollowPlaylist.id}`
+            let response;
+            if (isCurrentlyFollowing) {
+                // Unfollow: Gọi API DELETE
+                response = await httpRequest.delete(
+                    `artists/${currentArtistForFollowing.id}/follow`
                 );
-                showToast(`Đã bỏ theo dõi ${currentArtistForFollowing.name}`);
-                updateFollowButton(false);
-                currentFollowPlaylist = null;
             } else {
-                // Follow: Tạo playlist mới
-                const { playlist } = await httpRequest.post("playlists", {
-                    name: `[FOLLOW] ${currentArtistForFollowing.name}`,
-                    is_public: false,
-                });
-                showToast(
-                    `Đã theo dõi ${currentArtistForFollowing.name}!`,
-                    "success"
+                // Follow: Gọi API POST
+                response = await httpRequest.post(
+                    `artists/${currentArtistForFollowing.id}/follow`
                 );
-                updateFollowButton(true);
-                currentFollowPlaylist = playlist;
+            }
+
+            // Cập nhật trạng thái và UI
+            if (response && typeof response.is_following !== "undefined") {
+                isCurrentlyFollowing = response.is_following;
+                updateFollowButton(isCurrentlyFollowing);
+                showToast(response.message, "success");
             }
         } catch (error) {
-            showToast("Có lỗi xảy ra, vui lòng thử lại.", "error");
+            console.error("Lỗi khi thực hiện follow/unfollow:", error);
+            const errorMessage =
+                error.response?.error?.message ||
+                "Có lỗi xảy ra, vui lòng thử lại.";
+            showToast(errorMessage, "error");
         } finally {
             followBtn.disabled = false;
         }
@@ -1370,37 +1172,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Hiển thị danh sách bài hát phổ biến
         trackDataMap.clear(); //Xóa dữ liệu bài hát cũ
-        playerState.originalQueue = tracks;
-        if (playerState.isShuffled) {
-            playerState.currentQueue = shuffleArray([
-                ...playerState.originalQueue,
-            ]);
-        } else {
-            playerState.currentQueue = playerState.originalQueue;
-        }
+        const tracksForPlayer = [];
 
         trackList.innerHTML = ""; // Xóa nội dung cũ
         if (tracks && tracks.length > 0) {
             tracks.forEach((track, index) => {
-                // API track của nghệ sĩ có cấu trúc phẳng, cần tạo một đối tượng lồng nhau
-                // để tương thích với hàm createTrackItemElement.
-                const trackDataForElement = {
-                    ...track,
-                    album: {
-                        cover_image_url: track.album_cover_image_url,
-                    },
-                };
-                trackDataMap.set(track.id, trackDataForElement); // Lưu dữ liệu bài hát
-                const trackElement = createTrackItemElement(
-                    trackDataForElement,
-                    index + 1
-                );
+                trackDataMap.set(track.id, track);
+                tracksForPlayer.push(track);
+
+                const trackElement = createTrackItemElement(track, index + 1);
                 trackList.appendChild(trackElement);
             });
         } else {
             trackList.innerHTML =
                 '<p class="empty-list-message">Nghệ sĩ này chưa có bài hát nào.</p>';
         }
+        // Load hàng đợi cho player SAU KHI đã tạo xong map và danh sách
+        player.loadNewQueue(tracksForPlayer, trackDataMap);
     }
 
     function renderPlaylistDetail(playlist) {
@@ -1419,25 +1207,28 @@ document.addEventListener("DOMContentLoaded", () => {
         playlistName.textContent = playlist.name;
 
         // Lấy tên người tạo playlist, ưu tiên display_name, nếu không có thì dùng username
-        const ownerName = playlist.user_display_name || playlist.user_username;
-        description.textContent = playlist.description || `By ${ownerName}`;
+        let ownerName = playlist.user_display_name || playlist.user_username;
+        if (!ownerName) {
+            const userEmail = document.getElementById("user-name")?.textContent;
+            if (userEmail) {
+                const emailUsername = userEmail.split("@")[0];
+                ownerName = emailUsername.substring(0, 6);
+            }
+        }
+        description.textContent =
+            playlist.description ||
+            (ownerName ? `By ${ownerName}` : "Playlist");
         verifiedBadge.style.display = "none"; // Playlist không có trạng thái "đã xác minh"
 
         //Hiển thị danh sách bài hát
         trackDataMap.clear();
-        playerState.originalQueue = playlist.tracks || [];
-        if (playerState.isShuffled) {
-            playerState.currentQueue = shuffleArray([
-                ...playerState.originalQueue,
-            ]);
-        } else {
-            playerState.currentQueue = playerState.originalQueue;
-        }
+        const tracks = playlist.tracks || [];
+        tracks.forEach((track) => trackDataMap.set(track.id, track)); // Tạo map trước
+        player.loadNewQueue(tracks, trackDataMap); // Load hàng đợi cho player
 
         trackList.innerHTML = "";
-        if (playlist.tracks && playlist.tracks.length > 0) {
-            playlist.tracks.forEach((track, index) => {
-                trackDataMap.set(track.id, track);
+        if (tracks.length > 0) {
+            tracks.forEach((track, index) => {
                 const trackElement = createTrackItemElement(track, index + 1);
                 trackList.appendChild(trackElement);
             });
@@ -1446,23 +1237,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 '<p class="empty-list-message">Playlist này không có bài hát nào.</p>';
         }
     }
-
-    function updatePlayingTrackUI() {
-        // Xóa class 'playing' khỏi tất cả các mục
-        const allTrackItem = trackListContainer.querySelectorAll(".track-item");
-        allTrackItem.forEach((item) => item.classList.remove("playing"));
-
-        // Thêm class 'playing' vào bài hát hiện tại
-        if (playerState.currentTrack) {
-            const currentTrackItem = trackListContainer.querySelector(
-                `.track-item[data-track-id="${playerState.currentTrack.id}"]`
-            );
-            if (currentTrackItem) {
-                currentTrackItem.classList.add("playing");
-            }
-        }
-    }
-
     //Tạo Element
     function createTrackItemElement(track, index) {
         const item = document.createElement("div");
@@ -1472,10 +1246,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const durationMin = Math.floor(track.duration / 60);
         const durationSec = (track.duration % 60).toString().padStart(2, "0");
 
+        const imageUrl =
+            track.album?.cover_image_url ||
+            track.album_cover_image_url ||
+            track.image_url || // Xử lý trường hợp URL ảnh nằm trực tiếp trên track
+            "placeholder.svg";
+
         item.innerHTML = `
         <div class="track-number">${index}</div>
             <div class="track-image">
-                <img src="${track.album.cover_image_url}" alt="${track.title}">
+                <img src="${imageUrl}" alt="${track.title}">
             </div>
             <div class="track-info">
                 <div class="track-name">${track.title}</div>
