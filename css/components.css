@@ -814,6 +814,41 @@
     font-size: 10px;
 }
 
+/* --- Track Item Like Button --- */
+.track-item .track-like-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 16px;
+    opacity: 0;
+    transition: color 0.2s ease, opacity 0.2s ease;
+    padding: 8px;
+    margin: 0 8px;
+}
+
+.track-item:hover .track-like-btn,
+.track-item .track-like-btn.active {
+    opacity: 1; /* Hiện nút khi hover hoặc khi đã active */
+}
+
+.track-item .track-like-btn.active {
+    color: var(--accent-primary);
+}
+
+.track-item .track-like-btn:hover {
+    color: var(--text-primary);
+}
+
+.track-item .track-like-btn.active:hover {
+    color: var(--accent-hover);
+    transform: scale(1.1);
+}
+
+.track-item {
+    grid-template-columns: 20px 4fr 2fr 1fr 1fr 1fr;
+}
+
 /* Modal */
 .modal-overlay {
     position: fixed;
