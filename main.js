@@ -1,5 +1,7 @@
 import httpRequest from "./utils/httpRequest.js";
 import Player from "./components/Player.js";
+import SortDropdown from "./components/SortDropdown.js";
+import LibraryTabs from "./components/LibraryTabs.js";
 const likedTracks = new Set();
 
 /**
@@ -301,6 +303,37 @@ function displayFormError(inputElement, message) {
     formGroup.appendChild(errorDiv);
 }
 
+/**
+ * Lấy thông tin người dùng hiện tại từ localStorage
+ */
+function getCurrentUserFromStorage() {
+    try {
+        // 1. Kiểm tra xem localStorage có tồn tại không (quan trọng cho SSR hoặc chế độ bảo mật)
+        if (typeof localStorage === "undefined" || localStorage === null) {
+            console.warn("localStorage không khả dụng.");
+            return null;
+        }
+
+        const storedUser = localStorage.getItem("currentUser");
+
+        // 2. Kiểm tra xem dữ liệu có tồn tại và không phải là các chuỗi không hợp lệ
+        if (storedUser && storedUser !== "undefined" && storedUser !== "null") {
+            // 3. Parse dữ liệu JSON
+            return JSON.parse(storedUser);
+        }
+
+        return null;
+    } catch (e) {
+        console.error(
+            "Lỗi khi lấy hoặc parse dữ liệu người dùng từ localStorage:",
+            e
+        );
+        // Tùy chọn: Xóa dữ liệu bị hỏng để tránh lỗi lặp lại trong tương lai
+        // localStorage.removeItem("currentUser");
+        return null;
+    }
+}
+
 // User Menu Dropdown Functionality
 document.addEventListener("DOMContentLoaded", function () {
     const userAvatar = document.getElementById("userAvatar");
@@ -439,161 +472,31 @@ function setupPasswordVisibilityToggle(toggleBtn) {
     });
 }
 
-// Sort Dropdown Functionality
-
-document.addEventListener("DOMContentLoaded", function () {
+// Khởi tạo Sort Dropdown
+document.addEventListener("DOMContentLoaded", () => {
     const sortBtn = document.getElementById("sortBtn");
-    const sortBtnText = document.getElementById("sortBtnText");
     const sortDropdown = document.getElementById("sortDropdown");
     const libraryContent = document.querySelector(".library-content");
 
-    if (!sortBtn || !sortDropdown || !libraryContent) return;
-
-    //"Recents" sort
-    const initialLibraryItems = Array.from(libraryContent.children);
-
-    //Toggle dropdown
-    sortBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        sortDropdown.classList.toggle("show");
-    });
-
-    //Click to outside Close dropdown
-    document.addEventListener("click", function (e) {
-        if (!sortBtn.contains(e.target) && !sortDropdown.contains(e.target)) {
-            sortDropdown.classList.remove("show");
-        }
-    });
-
-    //Escape Key Close dropdown
-    document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && sortDropdown.classList.contains("show")) {
-            sortDropdown.classList.remove("show");
-        }
-    });
-
-    //Handle click sort Option
-    sortDropdown.addEventListener("click", function (e) {
-        const selectedItem = e.target.closest(".dropdown-item");
-
-        if (!selectedItem) return;
-
-        const sortType = selectedItem.dataset.sort;
-        const selectedText = selectedItem.textContent.trim();
-
-        //Update Text dropdown header
-        if (sortBtnText) {
-            sortBtnText.textContent = selectedText;
-        }
-
-        //Close dropdown when click Text
-        sortDropdown.classList.remove("show");
-        sortLibraryItems(sortType);
-    });
-
-    //Function Logic sortType
-    function sortLibraryItems(sortType) {
-        const items = Array.from(
-            libraryContent.querySelectorAll(".library-item")
-        );
-        let sortItems;
-
-        switch (sortType) {
-            case "artists":
-                sortItems = items.sort((a, b) => {
-                    const aIsArtist = a
-                        .querySelector(".item-subtitle")
-                        .textContent.includes("Artist");
-                    const bIsArtist = b
-                        .querySelector(".item-subtitle")
-                        .textContent.includes("Artist");
-
-                    if (aIsArtist === bIsArtist) return 0;
-                    return aIsArtist ? -1 : 1;
-                });
-                break;
-            case "playlists":
-                sortItems = items.sort((a, b) => {
-                    const aIsPlaylist = a
-                        .querySelector(".item-subtitle")
-                        .textContent.includes("Playlist");
-                    const bIsPlaylist = b
-                        .querySelector(".item-subtitle")
-                        .textContent.includes("Playlist");
-                    if (aIsPlaylist === bIsPlaylist) return 0;
-                    return aIsPlaylist ? -1 : 1;
-                });
-                break;
-            case "recents":
-            default:
-                sortItems = initialLibraryItems;
-                break;
-        }
-
-        libraryContent.innerHTML = "";
-        sortItems.forEach((item) => libraryContent.appendChild(item));
+    if (sortBtn && sortDropdown && libraryContent) {
+        new SortDropdown({
+            sortBtn,
+            sortDropdown,
+            libraryContent,
+        });
     }
 });
 
-//Function sort with Tabs
-document.addEventListener("DOMContentLoaded", function () {
+// Khởi tạo chức năng lọc bằng Tab
+document.addEventListener("DOMContentLoaded", () => {
     const navTabsContainer = document.querySelector(".nav-tabs");
-    if (!navTabsContainer) return;
-    navTabsContainer.addEventListener("click", function (e) {
-        const clickedTab = e.target.closest(".nav-tab");
-        if (!clickedTab) return;
+    const libraryContent = document.querySelector(".library-content");
 
-        //Update active tabs
-        navTabsContainer
-            .querySelector(".nav-tab.active")
-            .classList.remove("active");
-        clickedTab.classList.add("active");
-
-        //Filter on the data-attribute
-        const filter = clickedTab.dataset.filter;
-        filterLibraryItems(filter);
-    });
-
-    function filterLibraryItems(filter) {
-        // Lấy danh sách các mục mỗi khi hàm được gọi
-        // để đảm bảo các mục được thêm vào sau cũng được xử lý.
-        const libraryItems = document.querySelectorAll(
-            ".library-content .library-item"
-        );
-        libraryItems.forEach((item) => {
-            let shouldShow = false;
-
-            if (filter === "all") {
-                shouldShow = true;
-            } else if (filter === "playlists") {
-                const subtitle = item
-                    .querySelector(".item-subtitle")
-                    ?.textContent.toLowerCase();
-                // "Liked Songs" là một playlist đặc biệt
-                if (
-                    (subtitle && subtitle.includes("playlist")) ||
-                    item.querySelector(".liked-songs")
-                ) {
-                    shouldShow = true;
-                }
-            } else if (filter === "artists") {
-                const subtitle = item
-                    .querySelector(".item-subtitle")
-                    ?.textContent.toLowerCase();
-                if (subtitle && subtitle.includes("artist")) {
-                    shouldShow = true;
-                }
-            }
-
-            //Style display
-            item.style.display = shouldShow ? "flex" : "none";
+    if (navTabsContainer && libraryContent) {
+        new LibraryTabs({
+            navTabsContainer,
+            libraryContent,
         });
-    }
-
-    //Initially filter default active tab
-    const initialActiveTab = navTabsContainer.querySelector(".nav-tab.active");
-    if (initialActiveTab) {
-        filterLibraryItems(initialActiveTab.dataset.filter);
     }
 });
 
@@ -1372,16 +1275,7 @@ document.addEventListener("DOMContentLoaded", () => {
         playlistName.textContent = "Bài hát đã thích";
 
         // Lấy tên người dùng hiện tại để hiển thị
-        let currentUser = null;
-        try {
-            const storedUser = localStorage.getItem("currentUser");
-            if (storedUser) {
-                currentUser = JSON.parse(storedUser);
-            }
-        } catch (e) {
-            console.error("Lỗi khi parse dữ liệu người dùng:", e);
-            currentUser = null;
-        }
+        const currentUser = getCurrentUserFromStorage();
 
         const userName =
             currentUser?.display_name ||
