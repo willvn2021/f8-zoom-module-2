@@ -794,35 +794,40 @@ document.addEventListener("DOMContentLoaded", () => {
         formData.append("cover", file); // API yêu cầu key là 'cover'
 
         try {
-            // API cập nhật ảnh bìa playlist là POST /upload/playlist/:id/cover
-            const response = await httpRequest.post(
+            // Bước 1: Tải file ảnh lên server.
+            // Endpoint này sẽ lưu file và trả về URL của nó.
+            const uploadResponse = await httpRequest.post(
                 `upload/playlist/${currentPlaylistForUpdate.id}/cover`,
                 formData
             );
 
-            // API trả về URL của file mới, không phải toàn bộ đối tượng playlist.
-            if (!response || !response.file || !response.file.url) {
-                console.error(
-                    "Phản hồi không hợp lệ từ API tải lên ảnh bìa:",
-                    response
-                );
+            // Kiểm tra xem API có trả về URL hợp lệ không.
+            if (!uploadResponse?.file?.url) {
                 throw new Error("API không trả về URL ảnh hợp lệ.");
             }
 
             const serverOrigin = new URL(httpRequest.baseURL).origin;
-            const newImageUrl = serverOrigin + response.file.url;
+            const newImageUrl = serverOrigin + uploadResponse.file.url;
 
-            // Cập nhật ảnh bìa trên trang chi tiết
+            // Bước 2: Gửi yêu cầu PUT để cập nhật playlist với URL ảnh mới.
+            const { playlist: updatedPlaylistData } = await httpRequest.put(
+                `playlists/${currentPlaylistForUpdate.id}`,
+                { image_url: newImageUrl }
+            );
+
+            // Cập nhật state cục bộ và giao diện với dữ liệu mới nhất
+            currentPlaylistForUpdate = updatedPlaylistData;
+
+            // Cập nhật ảnh bìa trên trang chi tiết (vẫn dùng newImageUrl vì nó là URL đầy đủ)
             const heroImage = artistView.querySelector(".hero-image");
             heroImage.src = newImageUrl;
 
             // Cập nhật ảnh trong thư viện sidebar
             const libraryItem = document.querySelector(
-                `.library-item[data-playlist-id="${currentPlaylistForUpdate.id}"]`
+                `.library-item[data-playlist-id="${updatedPlaylistData.id}"]`
             );
             if (libraryItem) {
                 const libraryImage = libraryItem.querySelector(".item-image");
-                // Chỉ cập nhật ảnh nếu mục đó có thẻ <img> (tránh lỗi với "Liked Songs")
                 if (libraryImage) {
                     libraryImage.src = newImageUrl;
                 }
