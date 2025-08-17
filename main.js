@@ -2,41 +2,10 @@ import httpRequest from "./utils/httpRequest.js";
 import Player from "./components/Player.js";
 import SortDropdown from "./components/SortDropdown.js";
 import LibraryTabs from "./components/LibraryTabs.js";
+import ContextMenu from "./components/ContextMenu.js";
+import { showToast } from "./utils/showToast.js";
+
 const likedTracks = new Set();
-
-/**
-    Show Toast Message Function
- */
-
-function showToast(message, type = "success", duration = 3000) {
-    const toastContainer = document.getElementById("toastContainer");
-    if (!toastContainer) return;
-
-    const toast = document.createElement("div");
-    toast.className = `toast toast--${type}`;
-
-    const icons = {
-        success: "fa-check-circle",
-        error: "fa-times-circle",
-        info: "fa-info-circle",
-        warning: "fa-exclamation-circle",
-    };
-
-    toast.innerHTML = `
-         <i class="fas ${icons[type]} toast__icon"></i>
-        <span class="toast__message">${message}</span>
-    `;
-
-    toastContainer.appendChild(toast);
-    //Thêm class "show" để hiện thị
-    setTimeout(() => toast.classList.add("show"), 100);
-    //Xóa toast sau khi hết thời gian
-    setTimeout(() => {
-        toast.classList.remove("show");
-        //Xóa khỏi DOM khi animation kết thúc
-        toast.addEventListener("transitionend", () => toast.remove());
-    }, duration);
-}
 //Lưu lại các Track người dùng đã thích
 async function fetchAndStoreLikedTracks() {
     if (!localStorage.getItem("accessToken")) {
@@ -700,125 +669,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-//Context Menu
-document.addEventListener("DOMContentLoaded", () => {
-    const libraryContent = document.querySelector(".library-content");
-    const contextMenu = document.getElementById("libraryContextMenu");
-
-    if (!libraryContent || !contextMenu) return;
-    let currentTargetItem = null;
-
-    libraryContent.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-
-        currentTargetItem = e.target.closest(".library-item");
-        if (!currentTargetItem) return;
-
-        //Check loại kiểu Album
-        const subtitle =
-            currentTargetItem.querySelector(".item-subtitle")?.textContent ||
-            "";
-
-        const isArtist = subtitle.includes("Artist");
-        const isPlaylist =
-            subtitle.includes("Playlist") ||
-            currentTargetItem.querySelector(".liked-songs");
-
-        //Loại cơ bản
-        populateContextMenu(contextMenu, { isArtist, isPlaylist });
-
-        //Định vị theo chuột mở ra Menu
-        positionMenu(e, contextMenu);
-        contextMenu.classList.add("show");
-    });
-
-    //Đóng Context menu
-    function closeContextMenu() {
-        contextMenu.classList.remove("show");
-        currentTargetItem = null;
-    }
-
-    document.addEventListener("click", () => closeContextMenu());
-    document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeContextMenu();
-    });
-
-    function populateContextMenu(menu, { isArtist, isPlaylist }) {
-        menu.innerHTML = "";
-
-        if (isArtist) {
-            menu.innerHTML = `
-                <div class="dropdown-item" data-action="unfollow">
-                    <i class="fas fa-user-minus"></i>
-                    <span>Unfollow</span>
-                </div>
-                `;
-        } else if (isPlaylist) {
-            menu.innerHTML = `
-                <div class="dropdown-item" data-action="remove-from-profile">
-                    <i class="fas fa-minus-circle"></i>
-                    <span>Remove from profile</span>
-                </div>
-                <div class="dropdown-item" data-action="delete">
-                    <i class="fas fa-trash"></i>
-                    <span>Delete</span>
-                </div>
-            `;
-        }
-    }
-
-    //Định vị menu theo chuột phải
-    function positionMenu(e, menu) {
-        const { clientX: mouseX, clientY: mouseY } = e;
-        const { innerWidth: windowWidth, innerHeight: windowHeight } = window;
-        const { offsetWidth: menuWidth, offsetHeight: menuHeight } = menu;
-
-        const x =
-            mouseX + menuWidth > windowWidth ? mouseX - menuWidth : mouseX;
-        const y =
-            mouseY + menuHeight > windowHeight ? mouseY - menuHeight : mouseY;
-
-        menu.style.top = `${y}px`;
-        menu.style.left = `${x}px`;
-    }
-
-    //Hàm xử lý Context Menu
-    contextMenu.addEventListener("click", async (e) => {
-        const actionItem = e.target.closest("[data-action]");
-        if (!actionItem) return;
-
-        const action = actionItem.dataset.action;
-
-        if (action === "delete") {
-            if (!currentTargetItem) return;
-
-            const playlistId = currentTargetItem.dataset.playlistId;
-            const playlistName =
-                currentTargetItem.querySelector(".item-title").textContent;
-
-            if (!playlistId) return;
-
-            try {
-                await httpRequest.delete(`playlists/${playlistId}`);
-                showToast(`Đã xóa playlist "${playlistName}"`, "success");
-
-                // Xóa khỏi DOM
-                currentTargetItem.remove();
-
-                // Nếu đang xem chi tiết playlist này thì quay về home
-                if (currentPlaylistForUpdate?.id === playlistId) {
-                    switchToHomeView();
-                }
-            } catch (error) {
-                console.error("Không thể xóa playlist:", error);
-                showToast("Không thể xóa playlist. Vui lòng thử lại.", "error");
-            }
-        }
-
-        closeContextMenu();
-    });
-});
-
 //Xử lý điều hướng danh sách phát  & hiển thị
 document.addEventListener("DOMContentLoaded", () => {
     const mainContent = document.querySelector(".main-content");
@@ -877,6 +727,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- Component Initialization ---
     const player = new Player({ trackListContainer });
+
+    const contextMenuElement = document.getElementById("libraryContextMenu");
+    if (contextMenuElement) {
+        new ContextMenu({
+            contextMenuElement,
+            targetContainer: libraryContent,
+            onPlaylistDeleted: (playlistId) => {
+                //Nếu đang xem chi tiết playlist thì quay về home
+                if (currentPlaylistForUpdate?.id === playlistId)
+                    switchToHomeView();
+            },
+        });
+    }
 
     // --- Event Listeners for Dynamic Content ---
     trackListContainer.addEventListener("click", (e) => {
