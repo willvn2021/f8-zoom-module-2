@@ -4,6 +4,7 @@ import SortDropdown from "./components/SortDropdown.js";
 import LibraryTabs from "./components/LibraryTabs.js";
 import ContextMenu from "./components/ContextMenu.js";
 import { showToast } from "./utils/showToast.js";
+import BiggestHits from "./components/BiggestHits.js";
 
 const likedTracks = new Set();
 //Lưu lại các Track người dùng đã thích
@@ -630,42 +631,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-//Tạo Element Today's biggest hits "hit-card"
-function createBiggestHitCard(album) {
-    const card = document.createElement("div");
-    card.className = "hit-card";
-    card.dataset.albumId = album.id;
-
-    card.innerHTML = `
-        <div class="hit-card-cover">
-            <img src="${album.cover_image_url}" alt="${album.title}">
-            <button class="hit-play-btn">
-                <i class="fas fa-play"></i>
-            </button>
-        </div>
-        <div class="hit-card-info">
-            <h3 class="hit-card-title">${album.title}</h3>
-            <p class="hit-card-artist">${album.artist_name}</p>
-        </div>
-    `;
-
-    return card;
-}
-
-//Render ra danh sách Today's biggest hits "hit-card"
-document.addEventListener("DOMContentLoaded", async () => {
+// Khởi tạo Today's Biggest Hits
+document.addEventListener("DOMContentLoaded", () => {
     const hitsGrid = document.querySelector(".hits-grid");
-    if (!hitsGrid) return;
-    try {
-        const { albums } = await httpRequest.get("albums/popular?limit=20");
-        hitsGrid.innerHTML = "";
-
-        albums.forEach((album) => {
-            const hitCard = createBiggestHitCard(album);
-            hitsGrid.appendChild(hitCard);
-        });
-    } catch (error) {
-        console.error("Failed to load today's biggest hits:", error);
+    if (hitsGrid) {
+        new BiggestHits({ container: hitsGrid });
     }
 });
 
@@ -784,7 +754,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Thẻ album/playlist trong nội dung chính
         const playlistCard = e.target.closest(".hit-card");
         if (playlistCard && playlistCard.dataset.albumId) {
-            showPlaylistDetail(playlistCard.dataset.albumId);
+            showAlbumDetail(playlistCard.dataset.albumId);
             return;
         }
 
@@ -902,6 +872,17 @@ document.addEventListener("DOMContentLoaded", () => {
             createPlaylistBtn.disabled = false;
         }
     });
+
+    async function showAlbumDetail(albumId) {
+        try {
+            const album = await httpRequest.get(`albums/${albumId}`);
+            renderAlbumDetail(album);
+            switchToArtistView();
+        } catch (error) {
+            console.error("Lỗi khi lấy chi tiết album:", error);
+            showToast("Không thể tải chi tiết album.", "error");
+        }
+    }
 
     //Lấy data để Show UI
     async function showArtistDetail(artistId) {
@@ -1029,6 +1010,44 @@ document.addEventListener("DOMContentLoaded", () => {
             switchToArtistView();
         } catch (error) {
             console.error("Lỗi khi lấy chi tiết playlist:", error);
+        }
+    }
+
+    function renderAlbumDetail(album) {
+        const heroImage = artistView.querySelector(".hero-image");
+        const heroTitle = artistView.querySelector(".artist-name");
+        const heroSubtitle = artistView.querySelector(".monthly-listeners");
+        const verifiedBadge = artistView.querySelector(".verified-badge");
+        const trackList = artistView.querySelector(".track-list");
+
+        const artistHero = artistView.querySelector(".artist-hero");
+        artistHero.classList.add("is-playlist"); // Dùng class này để ảnh bìa vuông
+        followBtn.style.display = "none";
+        currentPlaylistForUpdate = null; // Đây là album, không cho phép cập nhật ảnh
+
+        heroImage.src = album.cover_image_url || "placeholder.svg";
+        heroImage.alt = `${album.title} cover`;
+        heroTitle.textContent = album.title;
+        heroSubtitle.textContent = album.artist_name
+            ? `Album • ${album.artist_name}`
+            : "Album";
+        verifiedBadge.style.display = "none";
+
+        // Hiển thị danh sách bài hát
+        trackDataMap.clear();
+        const tracks = album.tracks || [];
+        tracks.forEach((track) => trackDataMap.set(track.id, track));
+        player.loadNewQueue(tracks, trackDataMap);
+
+        trackList.innerHTML = "";
+        if (tracks.length > 0) {
+            tracks.forEach((track, index) => {
+                const trackElement = createTrackItemElement(track, index + 1);
+                trackList.appendChild(trackElement);
+            });
+        } else {
+            trackList.innerHTML =
+                '<p class="empty-list-message">Album này không có bài hát nào.</p>';
         }
     }
 
