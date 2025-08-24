@@ -5,6 +5,8 @@ import LibraryTabs from "./components/LibraryTabs.js";
 import ContextMenu from "./components/ContextMenu.js";
 import { showToast } from "./utils/showToast.js";
 import BiggestHits from "./components/BiggestHits.js";
+import PopularArtists from "./components/PopularArtists.js";
+import Tooltip from "./components/Tooltip.js";
 
 const likedTracks = new Set();
 //Lưu lại các Track người dùng đã thích
@@ -367,48 +369,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-//ToolTip với class 'has-tooltip'
-document.addEventListener("DOMContentLoaded", function () {
-    const tooltipEl = document.createElement("div");
-    tooltipEl.className = "spotify-tooltip";
-    document.body.appendChild(tooltipEl);
-
-    const triggers = document.querySelectorAll(".has-tooltip");
-    let showTimeout;
-
-    //Gắn sự kiện
-    triggers.forEach((trigger) => {
-        trigger.addEventListener("mouseenter", () => {
-            const tooltipText = trigger.dataset.tooltip;
-            if (!tooltipText) return;
-
-            //Gắn nội dung cho tooltip
-            tooltipEl.textContent = tooltipText;
-
-            //Lấy vị trí của button
-            const triggerRect = trigger.getBoundingClientRect();
-
-            //Công thức tính vị trí tooltip dựa trên vị trí Button / Top căn đỉnh của button / Left căn giữa button
-            const top = triggerRect.top;
-            const left = triggerRect.left + triggerRect.width / 2; //Ra 1 nửa là left
-
-            tooltipEl.style.top = `${top}px`;
-            tooltipEl.style.left = `${left}px`;
-
-            //Set độ trễ, tránh bị chớp khi rê chuột
-            showTimeout = setTimeout(() => {
-                tooltipEl.classList.add("show");
-            }, 150);
-        });
-
-        trigger.addEventListener("mouseleave", () => {
-            //Xóa timeout và ẩn tooltip khi rê chuột bỏ qua
-            clearTimeout(showTimeout);
-            tooltipEl.classList.remove("show");
-        });
-    });
-});
-
 async function updateCurrentUser(user) {
     const userName = document.querySelector("#user-name");
     const userAvatar = document.querySelector("#user-avatar");
@@ -592,42 +552,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 
-//Tạo Element Popular artists card
-function createPopularArtistCard(artist) {
-    const card = document.createElement("div");
-    card.className = "artist-card";
-    card.dataset.artistId = artist.id;
-
-    card.innerHTML = `
-        <div class="artist-card-cover">
-            <img src="${artist.image_url}" alt="${artist.name}">
-            <button class="artist-play-btn">
-                <i class="fas fa-play"></i>
-            </button>
-        </div>
-        <div class="artist-card-info">
-            <h3 class="artist-card-name">${artist.name}</h3>
-            <p class="artist-card-type">Artist</p>
-        </div>
-    `;
-    return card;
-}
-
-//Render ra danh sách Popular artists card
-document.addEventListener("DOMContentLoaded", async () => {
+// Khởi tạo Popular Artists
+document.addEventListener("DOMContentLoaded", () => {
     const artistsGrid = document.querySelector(".artists-grid");
-    if (!artistsGrid) return;
-
-    try {
-        const { artists } = await httpRequest.get("artists/trending?limit=20");
-        artistsGrid.innerHTML = "";
-
-        artists.forEach((artist) => {
-            const artistCard = createPopularArtistCard(artist);
-            artistsGrid.appendChild(artistCard);
-        });
-    } catch (error) {
-        console.error("Failed to load popular artists:", error);
+    if (artistsGrid) {
+        new PopularArtists({ container: artistsGrid });
     }
 });
 
@@ -696,6 +625,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // --- Component Initialization ---
+    // Khởi tạo Tooltip một lần cho toàn bộ ứng dụng
+    new Tooltip();
+
     const player = new Player({ trackListContainer });
 
     const contextMenuElement = document.getElementById("libraryContextMenu");
